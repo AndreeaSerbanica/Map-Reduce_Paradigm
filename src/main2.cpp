@@ -11,7 +11,8 @@
 
 using namespace std;
 
-pthread_mutex_t mutex;
+pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
+int completed_mappers = 0;
 
 struct MapperThread {
     vector<string> file_paths;
@@ -159,10 +160,10 @@ void *mapper(void *arg) {
         }
         file.close();
     }
-
-    // print the word counts
-    // print_word_counts(mt->word_counts);
-
+    
+    pthread_mutex_lock(&count_mutex);
+    completed_mappers++;
+    pthread_mutex_unlock(&count_mutex);
 
     return nullptr;
 }
@@ -290,16 +291,39 @@ int main(int argc, char **argv) {
     pthread_t threads[total_threads];
 
 
-    for (int i = 0; i < total_threads; ++i) {
-        if (i < num_mappers) {
-            mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
-            mapper(&mapper_threads_data[i]);
-            pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
-        } else {
-            reducer_threads_data[i - num_mappers] = init_ReducerThread(i - num_mappers, num_reducers, mapper_threads_data);
-            pthread_create(&threads[i], NULL, reducer, &reducer_threads_data[i - num_mappers]);
-        }
+    // for (int i = 0; i < total_threads; ++i) {
+    //     if (i < num_mappers) {
+    //         mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
+    //         // mapper(&mapper_threads_data[i]);
+    //         //print the adress of mapper_threads_data[i]
+    //         pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
+    //         cout << "In for 1: " << &mapper_threads_data[i] << endl;
+            
+    //         // print_word_counts(mapper_threads_data[i].word_counts);
+    //     } else {
+    //         reducer_threads_data[i - num_mappers] = init_ReducerThread(i - num_mappers, num_reducers, mapper_threads_data);
+    //         pthread_create(&threads[i], NULL, reducer, &reducer_threads_data[i - num_mappers]);
+    //     }
         
+    // }
+
+    for (int i = 0; i < num_mappers; ++i) {
+        mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
+        pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
+    }
+
+    while (true) {
+        pthread_mutex_lock(&count_mutex);
+        if (completed_mappers == num_mappers) {
+            pthread_mutex_unlock(&count_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&count_mutex);
+    }
+
+    for (int i = 0; i < num_reducers; ++i) {
+        reducer_threads_data[i] = init_ReducerThread(i, num_reducers, mapper_threads_data);
+        pthread_create(&threads[i + num_mappers], NULL, reducer, &reducer_threads_data[i]);
     }
 
     for (int i = 0; i < total_threads; ++i) {
