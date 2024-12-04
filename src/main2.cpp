@@ -17,7 +17,7 @@ struct MapperThread {
     vector<string> file_paths;
     int start_index;
     int end_index;
-    unordered_map<string, unordered_map<int, int>> word_counts;   // Fiecare cuvant are index file si de cat ori apare
+    unordered_map<string, unordered_map<int, int>> word_counts; 
 };
 
 struct ReducerThread {
@@ -61,7 +61,11 @@ ReducerThread init_ReducerThread(int id, int num_reducers, const vector<MapperTh
 }
 
 void print_word_counts(const unordered_map<string, unordered_map<int, int>> &word_counts) {
-    // Extract keys (words) from the map
+
+    if (word_counts.empty()) {
+        cout << "No words found" << endl;
+        return;
+    }
     vector<string> words;
     for (const auto &entry : word_counts) {
         words.push_back(entry.first);
@@ -155,6 +159,10 @@ void *mapper(void *arg) {
         }
         file.close();
     }
+
+    // print the word counts
+    // print_word_counts(mt->word_counts);
+
 
     return nullptr;
 }
@@ -273,34 +281,29 @@ int main(int argc, char **argv) {
     vector<MapperThread> mapper_threads_data(num_mappers);
 
 
-    for (int i = 0; i < num_mappers; ++i) {
-        mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
-        pthread_create(&threads_mapper[i], NULL, mapper, &mapper_threads_data[i]);
-    }
-
-    for (int i = 0; i < num_mappers; ++i) {
-        pthread_join(threads_mapper[i], NULL);
-    }
-
-
-
     //Reducer Part
     int num_reducers = stoi(argv[2]);
     pthread_t threads_reducer[num_reducers];
     vector<ReducerThread> reducer_threads_data(num_reducers);
 
-    for (int i = 0; i < num_reducers; ++i) {
-        reducer_threads_data[i] = init_ReducerThread(i, num_reducers, mapper_threads_data);
-        pthread_create(&threads_reducer[i], NULL, reducer, &reducer_threads_data[i]);
+    int total_threads = num_mappers + num_reducers;
+    pthread_t threads[total_threads];
+
+
+    for (int i = 0; i < total_threads; ++i) {
+        if (i < num_mappers) {
+            mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
+            mapper(&mapper_threads_data[i]);
+            pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
+        } else {
+            reducer_threads_data[i - num_mappers] = init_ReducerThread(i - num_mappers, num_reducers, mapper_threads_data);
+            pthread_create(&threads[i], NULL, reducer, &reducer_threads_data[i - num_mappers]);
+        }
+        
     }
 
-    for (int i = 0; i < num_mappers; ++i) {
-        pthread_join(threads_reducer[i], NULL);
+    for (int i = 0; i < total_threads; ++i) {
+        pthread_join(threads[i], NULL);
     }
-
-    // for (int i = 0; i < num_mappers; ++i) {
-    //     print_word_counts(mapper_threads_data[i].word_counts);
-    // }
-
     return 0;
 }
