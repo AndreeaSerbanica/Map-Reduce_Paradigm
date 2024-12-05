@@ -8,17 +8,23 @@
 #include <algorithm>
 #include <cctype>
 #include <unordered_set>
+#include <unordered_map>
 
 using namespace std;
 
-pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
-int completed_mappers = 0;
+// pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+struct SharedData {
+    pthread_mutex_t counter_mutex;
+    int completed_mappers;
+};
 
 struct MapperThread {
     vector<string> file_paths;
     int start_index;
     int end_index;
     unordered_map<string, unordered_map<int, int>> word_counts; 
+    SharedData *shared_data;
 };
 
 struct ReducerThread {
@@ -32,11 +38,12 @@ int min(int a, int b) {
     return a < b ? a : b;
 }
 
-MapperThread init_MapperThread(vector<string> file_paths, int id, int num_mappers) {
+MapperThread init_MapperThread(vector<string> file_paths, int id, int num_mappers, SharedData *shared_data) {
     MapperThread mt;
     mt.file_paths = file_paths;
     mt.start_index = id * (double)file_paths.size() / num_mappers;
     mt.end_index = min((id + 1) * (double)file_paths.size() / num_mappers, file_paths.size());
+    mt.shared_data = shared_data;
     return mt;
 }
 
@@ -161,9 +168,13 @@ void *mapper(void *arg) {
         file.close();
     }
     
-    pthread_mutex_lock(&count_mutex);
-    completed_mappers++;
-    pthread_mutex_unlock(&count_mutex);
+
+    // Signal completion
+    pthread_mutex_lock(&mt->shared_data->counter_mutex);
+    mt->shared_data->completed_mappers++;
+    pthread_mutex_unlock(&mt->shared_data->counter_mutex);
+    // cout << "Completed mappers: " << mt->shared_data->completed_mappers << endl;
+
 
     return nullptr;
 }
@@ -242,7 +253,12 @@ void *reducer(void *arg) {
     return nullptr;
 }
 
-
+SharedData initSharedData() {
+    SharedData sd;
+    sd.completed_mappers = 0;
+    sd.counter_mutex = PTHREAD_MUTEX_INITIALIZER;
+    return sd;
+}
 
 
 int main(int argc, char **argv) {
@@ -286,10 +302,16 @@ int main(int argc, char **argv) {
     int num_reducers = stoi(argv[2]);
     pthread_t threads_reducer[num_reducers];
     vector<ReducerThread> reducer_threads_data(num_reducers);
+    
 
     int total_threads = num_mappers + num_reducers;
     pthread_t threads[total_threads];
 
+    // SharedData shared_data = initSharedData();
+    // Initialize shared data
+    SharedData shared_data;
+    pthread_mutex_init(&shared_data.counter_mutex, NULL);
+    shared_data.completed_mappers = 0;
 
     // for (int i = 0; i < total_threads; ++i) {
     //     if (i < num_mappers) {
@@ -308,17 +330,18 @@ int main(int argc, char **argv) {
     // }
 
     for (int i = 0; i < num_mappers; ++i) {
-        mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
+        mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers, &shared_data);
         pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
     }
 
     while (true) {
-        pthread_mutex_lock(&count_mutex);
-        if (completed_mappers == num_mappers) {
-            pthread_mutex_unlock(&count_mutex);
+        pthread_mutex_lock(&shared_data.counter_mutex);
+        // cout << "Current completed mappers: " << shared_data.completed_mappers << endl;
+        if (shared_data.completed_mappers == num_mappers) {
+            pthread_mutex_unlock(&shared_data.counter_mutex);
             break;
         }
-        pthread_mutex_unlock(&count_mutex);
+        pthread_mutex_unlock(&shared_data.counter_mutex);
     }
 
     for (int i = 0; i < num_reducers; ++i) {
@@ -329,5 +352,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < total_threads; ++i) {
         pthread_join(threads[i], NULL);
     }
+
+    // Clean up mutex
+    pthread_mutex_destroy(&shared_data.counter_mutex);
     return 0;
 }
