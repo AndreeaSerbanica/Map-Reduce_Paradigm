@@ -1,0 +1,48 @@
+IMPLEMENTARE PARADIGMA MAP-REDUCE
+
+----- Structuri de Date -----
+
+SharedData:
+ - counter_mutex: mutex pentru a asigura accesul sincronizat la counter.
+ - completed_mappers: numărul de mappers care au terminat de procesat datele.
+
+MapperThread:
+ - file_paths: vector de string-uri care conține calea către fișierele de intrare.
+ - start_index/end_index: indexul de la care începe/se opreste să citească un mapper.
+ - word_counts: unordered_map care conține cuvintele, nr de apariții și id-ul fisierului în care se află.
+ - shared_data: referință către obiectul SharedData.
+
+ReducerThread:
+ - word_file_map: vector de pair care contine numele cuvintelor si id-ul fisierului in care se afla.
+ - start_index/end_index: indexul de la care începe/se opreste să citească un reducer.
+
+
+---- Functii ----
+
+init_MapperThread: 
+ - Inițializează un obiect MapperThread cu datele primite ca parametri.
+ - Calculează start_index și end_index pentru fiecare mapper.
+
+init_ReducerThread:
+  - Inițializează un obiect ReducerThread cu datele primite ca parametri.
+  - Calculează start_index și end_index pentru fiecare reducer.
+  - Pune în word_file_map toate cuvintele și id-ul fisierului în care se află.
+
+mapper:
+  - Procesează datele din fișierele de intrare și le pune în word_counts.
+  - Citeste fiecare fisier linie cu linie, apoi adauga fiecre cuvant in word_counts.
+  - Asigura accestul sincronizat la counter si incrementeaza completed_mappers, prin mutex.
+
+reducer:
+  - Fiecare reducer procesează un număr de cuvinte din word_file_map.
+  - Se genereaza fisere de iesire de tipul "a.txt", "b.txt" etc.
+  - Se filtreaza cuvintele in functie de litera de inceput.
+  - Sorteaza cuvintele din fiecare fiser, descrescator dupa numarul de aparitii si alfabetic.
+  - Scrie cuvintele in fisierul de iesire.
+
+main:
+  - Se citesc fisierele de intrare si se salveaza in file_paths.
+  - Se asteapta ca toate mappers sa termine de procesat datele. 
+  Pentru a asigura accesul sincronizat la counter, se foloseste un mutex.
+  - Se asteapta ca toate reducers sa termine de procesat datele.
+  - Se elibereaza memoria alocata pentru obiectele MapperThread si ReducerThread.

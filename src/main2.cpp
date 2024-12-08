@@ -12,13 +12,13 @@
 
 using namespace std;
 
-// pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
-
+// Shared data between threads
 struct SharedData {
     pthread_mutex_t counter_mutex;
     int completed_mappers;
 };
 
+// Mapper thread data
 struct MapperThread {
     vector<string> file_paths;
     int start_index;
@@ -27,6 +27,7 @@ struct MapperThread {
     SharedData *shared_data;
 };
 
+// Reducer thread data
 struct ReducerThread {
     vector<pair<string, unordered_set<int>>> word_file_map; // Cuvânt -> Set de ID-uri de fișiere
     int start_index;
@@ -68,55 +69,12 @@ ReducerThread init_ReducerThread(int id, int num_reducers, const vector<MapperTh
     return rt;
 }
 
-void print_word_counts(const unordered_map<string, unordered_map<int, int>> &word_counts) {
-
-    if (word_counts.empty()) {
-        cout << "No words found" << endl;
-        return;
-    }
-    vector<string> words;
-    for (const auto &entry : word_counts) {
-        words.push_back(entry.first);
-    }
-
-    // Sort the keys alphabetically
-    sort(words.begin(), words.end());
-
-    // Print words and their counts in alphabetical order
-    for (const auto &word : words) {
-        cout << word << ": ";
-        for (const auto &file_count : word_counts.at(word)) {
-            cout << "{" << file_count.first << ": " << file_count.second << " times} ";
-        }
-        cout << endl;
-    }
-}
-
-
-
-
-// Function to read and print a file
-void read_and_print_file(const string &file_path) {
-    ifstream file("../checker/" + file_path);
-    if (!file.is_open()) {
-        cerr << "Error opening file: " << file_path << endl;
-        return;
-    }
-
-    string line;
-    while (getline(file, line)) {
-        cout << line << endl;
-    }
-
-    file.close();
-}
-
-// Function to convert string to lowercase
+// Convert string to lowercase
 void to_lowercase(string &str) {
     transform(str.begin(), str.end(), str.begin(), ::tolower);
 }
 
-// Function to check if a word is valid
+// Remove punctuation from a word
 string remove_punctuation(const string &word) {
     string result;
     for (char c : word) {
@@ -127,19 +85,17 @@ string remove_punctuation(const string &word) {
     return result;
 }
 
-// Function to check if a word is valid after removing punctuation
+// Check if a word is valid after removing punctuation
 bool is_valid_word(string word) {
     return !word.empty() && all_of(word.begin(), word.end(), [](char c) {
         return isalnum(c);
     });
 }
 
-
+// Mapper function
 void *mapper(void *arg) {
-    // Cast the argument back to MapperThread pointer
     MapperThread *mt = (MapperThread *)arg;
 
-    // Iterate over the range of files assigned to this mapper
     for (int i = mt->start_index; i < mt->end_index; ++i) {
         string file_path = "../checker/" + mt->file_paths[i];
 
@@ -151,14 +107,12 @@ void *mapper(void *arg) {
         }
 
         string line, word;
-        int file_id = i + 1; // Assign file ID based on index
+        int file_id = i + 1;
         while (getline(file, line)) {
             istringstream iss(line);
             while (iss >> word) {
-                // Normalize word to lowercase
                 to_lowercase(word);
 
-                // Check if the word is valid
                 word = remove_punctuation(word);
                 if (is_valid_word(word)) {
                     mt->word_counts[word][file_id]++;
@@ -169,11 +123,10 @@ void *mapper(void *arg) {
     }
     
 
-    // Signal completion
+    // Mutex lock to update the counter
     pthread_mutex_lock(&mt->shared_data->counter_mutex);
     mt->shared_data->completed_mappers++;
     pthread_mutex_unlock(&mt->shared_data->counter_mutex);
-    // cout << "Completed mappers: " << mt->shared_data->completed_mappers << endl;
 
 
     return nullptr;
@@ -181,22 +134,20 @@ void *mapper(void *arg) {
 
 bool mySort(const pair<string, pair<unordered_set<int>, int>> &a,
             const pair<string, pair<unordered_set<int>, int>> &b) {
-    // Sort by number of appearances (descending)
+    // Appearances
     if (a.second.second != b.second.second) {
         return a.second.second > b.second.second;
     }
-    // Then alphabetically (ascending)
+    // Alphabetically
     return a.first < b.first;
 }
 
-
+// Reducer function
 void *reducer(void *arg) {
-    // Cast the argument back to ReducerThread pointer
     ReducerThread *rt = (ReducerThread *)arg;
 
-    // Iterate over the range assigned to this reducer
     for (int i = rt->start_index; i < rt->end_index; ++i) {
-        char letter = 'a' + i; // Corresponding letter for this index
+        char letter = 'a' + i;
         string file_name = string(1, letter) + ".txt";
 
         ofstream output_file(file_name);
@@ -205,10 +156,8 @@ void *reducer(void *arg) {
             continue;
         }
 
-        // Map to store aggregated file IDs for each word
         unordered_map<string, unordered_set<int>> aggregated_word_map;
 
-        // Merge all file IDs for words starting with the current letter
         for (const auto &entry : rt->word_file_map) {
             const string &word = entry.first;
             const unordered_set<int> &file_ids = entry.second;
@@ -218,23 +167,19 @@ void *reducer(void *arg) {
             }
         }
 
-        // Convert map to vector for sorting
         vector<pair<string, pair<unordered_set<int>, int>>> word_list;
         for (const auto &entry : aggregated_word_map) {
             word_list.push_back({entry.first, {entry.second, static_cast<int>(entry.second.size())}});
         }
 
-        // Sort using the mySort function
         sort(word_list.begin(), word_list.end(), mySort);
 
-        // Write the sorted results to the file
         for (const auto &entry : word_list) {
             const string &word = entry.first;
             const unordered_set<int> &file_ids = entry.second.first;
 
             output_file << word << ":[";
             
-            // Convert set to sorted vector for consistent ordering
             vector<int> sorted_file_ids(file_ids.begin(), file_ids.end());
             sort(sorted_file_ids.begin(), sorted_file_ids.end());
 
@@ -251,13 +196,6 @@ void *reducer(void *arg) {
     }
 
     return nullptr;
-}
-
-SharedData initSharedData() {
-    SharedData sd;
-    sd.completed_mappers = 0;
-    sd.counter_mutex = PTHREAD_MUTEX_INITIALIZER;
-    return sd;
 }
 
 
@@ -288,7 +226,6 @@ int main(int argc, char **argv) {
         if (getline(list_file, file_path)) {
             file_path.erase(file_path.find_last_not_of("\n\r") + 1); // Remove newline character
             file_paths.push_back(file_path);
-            // read_and_print_file(file_path);
         }
     }
     list_file.close();
@@ -307,36 +244,20 @@ int main(int argc, char **argv) {
     int total_threads = num_mappers + num_reducers;
     pthread_t threads[total_threads];
 
-    // SharedData shared_data = initSharedData();
     // Initialize shared data
     SharedData shared_data;
     pthread_mutex_init(&shared_data.counter_mutex, NULL);
     shared_data.completed_mappers = 0;
 
-    // for (int i = 0; i < total_threads; ++i) {
-    //     if (i < num_mappers) {
-    //         mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers);
-    //         // mapper(&mapper_threads_data[i]);
-    //         //print the adress of mapper_threads_data[i]
-    //         pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
-    //         cout << "In for 1: " << &mapper_threads_data[i] << endl;
-            
-    //         // print_word_counts(mapper_threads_data[i].word_counts);
-    //     } else {
-    //         reducer_threads_data[i - num_mappers] = init_ReducerThread(i - num_mappers, num_reducers, mapper_threads_data);
-    //         pthread_create(&threads[i], NULL, reducer, &reducer_threads_data[i - num_mappers]);
-    //     }
-        
-    // }
 
     for (int i = 0; i < num_mappers; ++i) {
         mapper_threads_data[i] = init_MapperThread(file_paths, i, num_mappers, &shared_data);
         pthread_create(&threads[i], NULL, mapper, &mapper_threads_data[i]);
     }
 
+    // Let all the mapper threads finish their execution
     while (true) {
         pthread_mutex_lock(&shared_data.counter_mutex);
-        // cout << "Current completed mappers: " << shared_data.completed_mappers << endl;
         if (shared_data.completed_mappers == num_mappers) {
             pthread_mutex_unlock(&shared_data.counter_mutex);
             break;
